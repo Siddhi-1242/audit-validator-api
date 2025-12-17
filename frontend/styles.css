@@ -1,0 +1,242 @@
+:root {
+    --primary: #4F46E5;
+    --primary-hover: #4338ca;
+    --bg: #F3F4F6;
+    --card-bg: #FFFFFF;
+    --text-main: #111827;
+    --text-sub: #6B7280;
+    --success: #10B981;
+    --error: #EF4444;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg);
+    color: var(--text-main);
+    margin: 0;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+}
+
+.container {
+    width: 100%;
+    max-width: 800px;
+    padding: 2rem;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 3rem;
+}
+
+h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(to right, var(--primary), #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+    color: var(--text-sub);
+    font-size: 1.1rem;
+}
+
+.upload-box {
+    background: var(--card-bg);
+    border: 2px dashed #E5E7EB;
+    border-radius: 1rem;
+    padding: 3rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.upload-box:hover {
+    border-color: var(--primary);
+    background: #EEF2FF;
+}
+
+.upload-icon {
+    stroke: var(--primary);
+}
+
+.btn-primary {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 1rem 2rem;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    font-size: 1rem;
+    cursor: pointer;
+    margin-top: 1.5rem;
+    width: 100%;
+    transition: background 0.2s;
+}
+
+.btn-primary:disabled {
+    background: #9CA3AF;
+    cursor: not-allowed;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+}
+
+.results-hidden {
+    display: none;
+}
+
+.status-banner {
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    margin-top: 2rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    font-weight: 700;
+    font-size: 1.5rem;
+    letter-spacing: 0.05em;
+}
+
+.status-pass {
+    background: #D1FAE5;
+    color: #065F46;
+}
+
+.status-fail {
+    background: #FEE2E2;
+    color: #991B1B;
+}
+
+.section-header h3 {
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+    border-bottom: 2px solid #E5E7EB;
+    padding-bottom: 0.5rem;
+    color: var(--text-main);
+}
+
+/* CARDS (Page 1) */
+.results-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+}
+
+.result-card {
+    background: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-left: 5px solid transparent;
+}
+
+.card-valid {
+    border-color: var(--success);
+}
+
+.card-invalid {
+    border-color: var(--error);
+}
+
+.field-name {
+    font-weight: 600;
+    color: var(--text-sub);
+    font-size: 0.9rem;
+    text-transform: uppercase;
+}
+
+.field-value {
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: var(--text-main);
+    margin-top: 0.5rem;
+}
+
+.error-msg {
+    color: var(--error);
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+}
+
+/* ROWS (Page 2) */
+.row-card {
+    background: var(--card-bg);
+    border: 1px solid #E5E7EB;
+    border-radius: 0.5rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+}
+
+.row-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.row-header h4 {
+    margin: 0;
+    color: var(--text-sub);
+}
+
+.badge-pass {
+    background: #D1FAE5;
+    color: #065F46;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 0.8rem;
+}
+
+.badge-fail {
+    background: #FEE2E2;
+    color: #991B1B;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 0.8rem;
+}
+
+.row-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    font-size: 0.9rem;
+}
+
+.mini-field {
+    display: flex;
+    flex-direction: column;
+}
+
+.mini-label {
+    font-weight: 600;
+    color: #6B7280;
+    font-size: 0.8rem;
+}
+
+.mini-value {
+    font-family: monospace;
+    font-weight: 500;
+}
+
+.mini-error {
+    color: var(--error);
+    font-size: 0.75rem;
+}
+
+.text-success {
+    color: var(--success);
+}
+
+.text-error {
+    color: var(--error);
+}
