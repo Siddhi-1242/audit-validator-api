@@ -32,8 +32,12 @@ async def validate_document_endpoint(file: UploadFile = File(...)):
         
         # 2. Validate
         result = validate_document(normalized_content)
-        
-        return result
+
+        return {
+            "success": True,
+            "isValid": result.get("isValid", False),
+            "reason": result.get("reason", "Validation completed")
+        }
 
     except Exception as e:
         import traceback
