@@ -8,47 +8,44 @@ from .rules import (
     validate_transaction_type
 )
 
+
 def validate_page_1(data: dict):
     fields_res = {}
     page_valid = True
-    errors = []  # Added to collect human-readable errors
+    errors = []
 
     # 1. Company Name
     val = data.get("company_name")
     is_valid, err = validate_company_name_rule(val)
     fields_res["company_name"] = {"value": val, "valid": is_valid, "error": err}
     if not is_valid:
-        page_valid = False
-        errors.append(f"Company Name error: {err}")
+        errors.append(f"Company Name warning: {err}")
 
     # 2. Year (Period End)
     val = data.get("year_period_end")
     is_valid, err = validate_year_period_rule(val)
     fields_res["year"] = {"value": val, "valid": is_valid, "error": err}
     if not is_valid:
-        page_valid = False
-        errors.append(f"Year Period error: {err}")
+        errors.append(f"Year Period warning: {err}")
 
     # 3. Completed By
     val = data.get("completed_by")
     is_valid, err = validate_completed_by_rule(val)
     fields_res["completed_by"] = {"value": val, "valid": is_valid, "error": err}
     if not is_valid:
-        page_valid = False
-        errors.append(f"Completed By error: {err}")
+        errors.append(f"Completed By warning: {err}")
 
     # 4. Date
     val = data.get("date")
     is_valid, err = validate_date_rule(val)
     fields_res["date"] = {"value": val, "valid": is_valid, "error": err}
     if not is_valid:
-        page_valid = False
-        errors.append(f"Date error: {err}")
+        errors.append(f"Date warning: {err}")
 
     return {
-        "status": "PASS" if page_valid else "FAIL",
+        "status": "PASS",   # Page-1 always structurally valid
         "fields": fields_res,
-        "errors": errors  # Added
+        "errors": errors
     }
 
 
@@ -56,7 +53,7 @@ def validate_page_2(data: dict):
     rows = data.get("rows", [])
     row_results = []
     page_valid = True
-    errors = []  # Added to collect row-level errors
+    errors = []
 
     # Identify filled rows
     filled_rows = []
@@ -69,19 +66,19 @@ def validate_page_2(data: dict):
         if any(vals):
             filled_rows.append(row)
 
-    # Mandatory disclosure
+    # ✅ ZERO related parties is allowed
     if not filled_rows:
         return {
-            "status": "FAIL",
+            "status": "PASS",
             "rows": [],
-            "errors": ["No related party rows provided. At least one row must be filled."]  # Modified
+            "errors": ["No related party transactions disclosed (allowed)."]
         }
 
     # Validate filled rows
     for i, row in enumerate(filled_rows):
         row_status = True
         field_res = {}
-        row_errors = []  # Collect errors for this row
+        row_errors = []
 
         # Business Name
         val = row.get("business_name")
@@ -109,7 +106,7 @@ def validate_page_2(data: dict):
 
         if not row_status:
             page_valid = False
-            errors.extend(row_errors)  # Add row errors to page errors
+            errors.extend(row_errors)
 
         row_results.append({
             "row_number": i + 1,
@@ -120,7 +117,7 @@ def validate_page_2(data: dict):
     return {
         "status": "PASS" if page_valid else "FAIL",
         "rows": row_results,
-        "errors": errors  # Added
+        "errors": errors
     }
 
 
@@ -140,11 +137,15 @@ def validate_document(normalized_content: dict):
     p2_res = validate_page_2(p2_content)
     all_errors.extend(p2_res.get("errors", []))
 
-    overall = "PASS" if (p1_res["status"] == "PASS" and p2_res["status"] == "PASS") else "FAIL"
+    # ✅ STRICT AND LOGIC (UNCHANGED)
+    overall = "PASS" if (
+        p1_res["status"] == "PASS" and
+        p2_res["status"] == "PASS"
+    ) else "FAIL"
 
     return {
         "overall_status": overall,
         "page_1": p1_res,
         "page_2": p2_res,
-        "errors": all_errors  # Added
+        "errors": all_errors
     }
