@@ -80,25 +80,34 @@ def validate_page_2(data: dict):
         field_res = {}
         row_errors = []
 
-        # Business Name
+        # Business Name (validate only if value exists)
         val = row.get("business_name")
-        is_valid, err = validate_business_name(val)
+        if val:
+            is_valid, err = validate_business_name(val)
+        else:
+            is_valid, err = True, None
         field_res["business_person_name"] = {"value": val, "valid": is_valid, "error": err}
         if not is_valid:
             row_status = False
             row_errors.append(f"Row {i+1} Business Name error: {err}")
 
-        # Criteria Code
+        # Criteria Code (validate only if value exists)
         val = row.get("criteria_code")
-        is_valid, err = validate_criteria_code(val)
+        if val:
+            is_valid, err = validate_criteria_code(val)
+        else:
+            is_valid, err = True, None
         field_res["criteria_code"] = {"value": val, "valid": is_valid, "error": err}
         if not is_valid:
             row_status = False
             row_errors.append(f"Row {i+1} Criteria Code error: {err}")
 
-        # Transaction Type
+        # Transaction Type (validate only if value exists)
         val = row.get("transaction_type")
-        is_valid, err = validate_transaction_type(val)
+        if val:
+            is_valid, err = validate_transaction_type(val)
+        else:
+            is_valid, err = True, None
         field_res["transaction_type"] = {"value": val, "valid": is_valid, "error": err}
         if not is_valid:
             row_status = False
