@@ -8,53 +8,76 @@ from .rules import (
     validate_transaction_type
 )
 
+# --- Status Constants ---
+STATUS_PASS = "PASS"
+STATUS_FAIL = "FAIL"
+STATUS_PARTIAL_PASS = "PARTIAL_PASS"
+STATUS_INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+FIELD_STATUS_VALID = "FOUND_AND_VALID"
+FIELD_STATUS_INVALID = "FOUND_BUT_INVALID"
+FIELD_STATUS_NOT_FOUND = "NOT_FOUND"
+
+
+def validate_field(value, rule_func, field_name):
+    """
+    Helper to validate a single field using a rule function.
+    Returns a dict with 'status', 'value', 'error'.
+    """
+    if value and isinstance(value, str) and value.strip():
+        # Field Found -> Check Validity
+        is_valid, err = rule_func(value)
+        if is_valid:
+            return {
+                "status": FIELD_STATUS_VALID,
+                "value": value,
+                "error": None
+            }
+        else:
+            return {
+                "status": FIELD_STATUS_INVALID,
+                "value": value,
+                "error": err
+            }
+    else:
+        # Field Not Found / Empty
+        return {
+            "status": FIELD_STATUS_NOT_FOUND,
+            "value": None,
+            "error": "Field not extracted or empty."
+        }
+
 
 def validate_page_1(data: dict):
     fields_res = {}
-    page_valid = True
-    errors = []
-
+    
     # 1. Company Name
-    val = data.get("company_name")
-    is_valid, err = validate_company_name_rule(val)
-    fields_res["company_name"] = {"value": val, "valid": is_valid, "error": err}
-    if not is_valid:
-        errors.append(f"Company Name warning: {err}")
+    fields_res["company_name"] = validate_field(
+        data.get("company_name"), validate_company_name_rule, "Company Name"
+    )
 
     # 2. Year (Period End)
-    val = data.get("year_period_end")
-    is_valid, err = validate_year_period_rule(val)
-    fields_res["year"] = {"value": val, "valid": is_valid, "error": err}
-    if not is_valid:
-        errors.append(f"Year Period warning: {err}")
+    fields_res["year"] = validate_field(
+        data.get("year_period_end"), validate_year_period_rule, "Year Period"
+    )
 
     # 3. Completed By
-    val = data.get("completed_by")
-    is_valid, err = validate_completed_by_rule(val)
-    fields_res["completed_by"] = {"value": val, "valid": is_valid, "error": err}
-    if not is_valid:
-        errors.append(f"Completed By warning: {err}")
+    fields_res["completed_by"] = validate_field(
+        data.get("completed_by"), validate_completed_by_rule, "Completed By"
+    )
 
     # 4. Date
-    val = data.get("date")
-    is_valid, err = validate_date_rule(val)
-    fields_res["date"] = {"value": val, "valid": is_valid, "error": err}
-    if not is_valid:
-        errors.append(f"Date warning: {err}")
+    fields_res["date"] = validate_field(
+        data.get("date"), validate_date_rule, "Date"
+    )
 
-    return {
-        "status": "PASS",   # Page-1 always structurally valid
-        "fields": fields_res,
-        "errors": errors
-    }
+    return fields_res
 
 
 def validate_page_2(data: dict):
     rows = data.get("rows", [])
     row_results = []
-    page_valid = True
-    errors = []
-
+    
     # Identify filled rows
     filled_rows = []
     for row in rows:
@@ -66,67 +89,35 @@ def validate_page_2(data: dict):
         if any(vals):
             filled_rows.append(row)
 
-    # ✅ ZERO related parties is allowed
+    # ZERO related parties is allowed -> PASS with text note, but effectively no field status to lower the score.
     if not filled_rows:
         return {
-            "status": "PASS",
-            "rows": [],
-            "errors": ["No related party transactions disclosed (allowed)."]
+            "status": STATUS_PASS,
+            "detail": "No related party transactions disclosed (allowed).",
+            "rows": []
         }
 
     # Validate filled rows
     for i, row in enumerate(filled_rows):
-        row_status = True
-        field_res = {}
-        row_errors = []
-
-        # Business Name (validate only if value exists)
-        val = row.get("business_name")
-        if val:
-            is_valid, err = validate_business_name(val)
-        else:
-            is_valid, err = True, None
-        field_res["business_person_name"] = {"value": val, "valid": is_valid, "error": err}
-        if not is_valid:
-            row_status = False
-            row_errors.append(f"Row {i+1} Business Name error: {err}")
-
-        # Criteria Code (validate only if value exists)
-        val = row.get("criteria_code")
-        if val:
-            is_valid, err = validate_criteria_code(val)
-        else:
-            is_valid, err = True, None
-        field_res["criteria_code"] = {"value": val, "valid": is_valid, "error": err}
-        if not is_valid:
-            row_status = False
-            row_errors.append(f"Row {i+1} Criteria Code error: {err}")
-
-        # Transaction Type (validate only if value exists)
-        val = row.get("transaction_type")
-        if val:
-            is_valid, err = validate_transaction_type(val)
-        else:
-            is_valid, err = True, None
-        field_res["transaction_type"] = {"value": val, "valid": is_valid, "error": err}
-        if not is_valid:
-            row_status = False
-            row_errors.append(f"Row {i+1} Transaction Type error: {err}")
-
-        if not row_status:
-            page_valid = False
-            errors.extend(row_errors)
-
+        row_fields = {}
+        
+        row_fields["business_person_name"] = validate_field(
+            row.get("business_name"), validate_business_name, "Business Name"
+        )
+        row_fields["criteria_code"] = validate_field(
+            row.get("criteria_code"), validate_criteria_code, "Criteria Code"
+        )
+        row_fields["transaction_type"] = validate_field(
+            row.get("transaction_type"), validate_transaction_type, "Transaction Type"
+        )
+        
         row_results.append({
             "row_number": i + 1,
-            "row_status": "PASS" if row_status else "FAIL",
-            "fields": field_res
+            "fields": row_fields
         })
 
     return {
-        "status": "PASS" if page_valid else "FAIL",
-        "rows": row_results,
-        "errors": errors
+        "rows": row_results
     }
 
 
@@ -135,26 +126,73 @@ def validate_document(normalized_content: dict):
 
     all_errors = []
 
-    # Page 1
+    # --- Step 1: Check for Insufficient Data ---
     p1_text = normalized_content.get("page_1", {}).get("text", "")
-    p1_data, _ = extract_page_1_headers(p1_text)
-    p1_res = validate_page_1(p1_data)
-    all_errors.extend(p1_res.get("errors", []))
+    # Heuristic: If text is extremely short, it's likely a bad extract or empty file.
+    if not p1_text or len(p1_text.strip()) < 50:
+         return {
+            "overall_status": STATUS_INSUFFICIENT_DATA,
+            "page_1": {},
+            "page_2": {},
+            "errors": ["Document content is empty, too short, or unreadable."]
+        }
 
-    # Page 2
+    # --- Step 2: Extract & Validate Page 1 ---
+    # We ignore extraction_metadata here because normalized_content already implies extraction done.
+    # Actually wait, validate_document calls extract_page_1_headers again? 
+    # The routes.py calls ingest_document which calls extractors?
+    # Checking `routes.py`:
+    # normalized_content = await ingest_document(file, file_path)
+    # Checking `ingest_document` in `router.py` (not viewed but implied):
+    # Typically `ingest` returns structured data.
+    # BUT `validate_document` on line 133 of original file WAS calling `extract_page_1_headers`.
+    # AND `routes.py` passes `normalized_content`.
+    # So `normalized_content` probably just has RAW TEXT for Page 1, and `validate_document` extracts fields?
+    # Let's verify `ingest_document`.
+    # Based on `validate_document` original code:
+    # 139: p1_text = normalized_content.get("page_1", {}).get("text", "")
+    # 140: p1_data, _ = extract_page_1_headers(p1_text)
+    # So YES, we extract here.
+    
+    p1_data, _ = extract_page_1_headers(p1_text)
+    p1_res_fields = validate_page_1(p1_data)
+    
+    # --- Step 3: Validate Page 2 ---
     p2_content = normalized_content.get("page_2", {})
     p2_res = validate_page_2(p2_content)
-    all_errors.extend(p2_res.get("errors", []))
-
-    # ✅ STRICT AND LOGIC (UNCHANGED)
-    overall = "PASS" if (
-        p1_res["status"] == "PASS" and
-        p2_res["status"] == "PASS"
-    ) else "FAIL"
-
+    
+    # --- Step 4: Aggregate Status ---
+    all_statuses = []
+    
+    # Page 1
+    for k, f_res in p1_res_fields.items():
+        all_statuses.append(f_res["status"])
+        if f_res["error"]:
+            all_errors.append(f"Page 1 {k}: {f_res['error']}")
+            
+    # Page 2
+    if "rows" in p2_res:
+        for row in p2_res["rows"]:
+            for k, f_res in row["fields"].items():
+                all_statuses.append(f_res["status"])
+                if f_res["error"]:
+                    all_errors.append(f"Page 2 Row {row['row_number']} {k}: {f_res['error']}")
+    
+    has_invalid = FIELD_STATUS_INVALID in all_statuses
+    has_missing = FIELD_STATUS_NOT_FOUND in all_statuses
+    
+    if has_invalid:
+        top_status = STATUS_FAIL
+    elif has_missing:
+        top_status = STATUS_PARTIAL_PASS
+    else:
+        top_status = STATUS_PASS
+        
     return {
-        "overall_status": overall,
-        "page_1": p1_res,
+        "overall_status": top_status,
+        "page_1": {
+            "fields": p1_res_fields
+        },
         "page_2": p2_res,
         "errors": all_errors
     }
