@@ -19,24 +19,42 @@ FIELD_STATUS_INVALID = "FOUND_BUT_INVALID"
 FIELD_STATUS_NOT_FOUND = "NOT_FOUND"
 
 
+
+def clean_value(value):
+    """
+    Centralized value normalization.
+    Strips whitespace, removes trailing colons, collapses multiple spaces.
+    """
+    if not isinstance(value, str):
+        return None
+    
+    val = value.strip()
+    if val.endswith(":"):
+        val = val[:-1].strip()
+        
+    val = " ".join(val.split())
+    return val if val else None
+
 def validate_field(value, rule_func, field_name):
     """
     Helper to validate a single field using a rule function.
     Returns a dict with 'status', 'value', 'error'.
     """
-    if value and isinstance(value, str) and value.strip():
+    cleaned_val = clean_value(value)
+    
+    if cleaned_val:
         # Field Found -> Check Validity
-        is_valid, err = rule_func(value)
+        is_valid, err = rule_func(cleaned_val)
         if is_valid:
             return {
                 "status": FIELD_STATUS_VALID,
-                "value": value,
+                "value": cleaned_val,
                 "error": None
             }
         else:
             return {
                 "status": FIELD_STATUS_INVALID,
-                "value": value,
+                "value": cleaned_val,
                 "error": err
             }
     else:
@@ -82,11 +100,11 @@ def validate_page_2(data: dict):
     filled_rows = []
     for row in rows:
         vals = [
-            str(row.get("business_name") or "").strip(),
-            str(row.get("criteria_code") or "").strip(),
-            str(row.get("transaction_type") or "").strip()
+            clean_value(row.get("business_name")),
+            clean_value(row.get("criteria_code")),
+            clean_value(row.get("transaction_type"))
         ]
-        if any(vals):
+        if any(v for v in vals if v):
             filled_rows.append(row)
 
     # ZERO related parties is allowed -> PASS with text note, but effectively no field status to lower the score.
@@ -131,15 +149,19 @@ def validate_document(normalized_content: dict):
     all_pages = normalized_content.get("all_pages_text", {})
     p1_text = normalized_content.get("page_1", {}).get("text", "")
     
-    # If we have scanning capability, check if we have ANY text
-    full_text_len = sum(len(t) for t in all_pages.values()) if all_pages else len(p1_text)
+    # Combine all text
+    full_text = "\n".join(all_pages.values()) if all_pages else p1_text
     
-    if full_text_len < 50:
+    # Stricter Check: Length > 200 AND Keywords
+    keywords = ["audit", "period", "company", "financial", "completed by"]
+    found_keywords = sum(1 for k in keywords if k in full_text.lower())
+    
+    if len(full_text.strip()) < 200 or found_keywords < 2:
          return {
             "overall_status": STATUS_INSUFFICIENT_DATA,
             "page_1": {},
             "page_2": {},
-            "errors": ["Document content is empty, too short, or unreadable."]
+            "errors": [f"Document content insufficient (Len: {len(full_text.strip())}, Keywords: {found_keywords}/5)."]
         }
 
     # --- Step 2: Extract & Validate Headers ---

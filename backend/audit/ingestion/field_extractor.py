@@ -54,19 +54,42 @@ def extract_headers(all_pages_text: dict):
     # 2. Robust Regex Extraction
     # Defined inside function to use local scope ease
     patterns = {
-        "company_name": r"(?i)(?:company|client)\s*name[:\s]+(.*?)(?:\n|\||$)",
-        "year_period_end": r"(?i)year\s*(?:/|\\)?\s*(?:period)?\s*(?:end)?[:\s]+(.*?)(?:\n|\||$)",
-        "completed_by": r"(?i)(?:completed|prepared)\s*by[:\s]+(.*?)(?:\n|\||$)",
-        "date": r"(?i)date(?:1_af_date)?[:\s]+(.*?)(?:\n|\||$)"
+        "company_name": r"(?i)(?:company|client)\s*name[:\s]+(.*)",
+        "year_period_end": r"(?i)year\s*(?:/|\\)?\s*(?:period)?\s*(?:end)?[:\s]+(.*)",
+        "completed_by": r"(?i)(?:completed|prepared)\s*by[:\s]+(.*)",
+        "date": r"(?i)date(?:1_af_date)?[:\s]+(.*)"
     }
 
     for field, pattern in patterns.items():
         match = re.search(pattern, target_page_text)
         if match:
-            # Clean up the match
-            raw_val = match.group(1).strip()
-            # Stop at common delimiters if regex was too greedy
-            # (Though non-greedy *? usually handles it stopping at newline)
+            # Clean up the match: Take only the first line of the capture
+            # This avoids any regex issues with newlines
+            full_capture = match.group(1)
+            raw_val = re.split(r'[\r\n]+', full_capture)[0].split('|')[0].strip()
+            
+            # Label Bleed Guard
+            # 1. Check if ends with colon (likely captured the next label)
+            if raw_val.endswith(":"):
+                # Try to split by the last space-separated word if it looks like a label
+                # Or just treat as invalid/empty if it looks entirely like a label
+                # Simplest fix for "Year / Period End:" being captured as Company Name:
+                extraction_metadata[field] = "NOT_FOUND" 
+                extracted_data[field] = None
+                continue
+
+            # 2. Check if it explicitly contains another known keyword followed by colon
+            # Heuristic: split on known next-field labels if they exist in the value
+            # e.g. "ABC Inc. Year:" -> "ABC Inc."
+            # We defined patterns keys, let's look for their label markers
+            # This is complex to do perfectly with regex alone, but we can do a quick split
+            # A common issue is "Company Name: ABC Year: 2023"
+            
+            # Simple heuristic: Split by " Year:" or " Period:" etc?
+            # Better: just use the simple "ends with :" check as primary guard.
+            # And maybe check if it contains "  " (double space) followed by something that looks like Title Case?
+            # Let's stick to the prompt's suggestion: "Reject values that ... End with :"
+            
             if raw_val:
                 extracted_data[field] = raw_val
                 extraction_metadata[field] = "FOUND"

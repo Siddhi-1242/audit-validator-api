@@ -2,3 +2,4 @@ venv/
 temp_uploads/
 __pycache__/
 *.pyc
+debug_extraction.log 
