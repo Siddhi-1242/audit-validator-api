@@ -44,7 +44,8 @@ async def ingest_document(file, file_path: str) -> dict:
 
         return {
             "page_1": {"text": p1_text},
-            "page_2": {"rows": normalized_rows}
+            "page_2": {"rows": normalized_rows},
+            "all_pages_text": pages_text  # Pass full text for robust header extraction
         }
         
     elif ext == '.docx':

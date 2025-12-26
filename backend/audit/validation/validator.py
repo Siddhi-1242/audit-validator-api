@@ -122,14 +122,19 @@ def validate_page_2(data: dict):
 
 
 def validate_document(normalized_content: dict):
-    from ..ingestion.field_extractor import extract_page_1_headers
+    from ..ingestion.field_extractor import extract_headers
 
     all_errors = []
 
     # --- Step 1: Check for Insufficient Data ---
+    # We now look at all_pages_text if available, else fallback to page_1 text
+    all_pages = normalized_content.get("all_pages_text", {})
     p1_text = normalized_content.get("page_1", {}).get("text", "")
-    # Heuristic: If text is extremely short, it's likely a bad extract or empty file.
-    if not p1_text or len(p1_text.strip()) < 50:
+    
+    # If we have scanning capability, check if we have ANY text
+    full_text_len = sum(len(t) for t in all_pages.values()) if all_pages else len(p1_text)
+    
+    if full_text_len < 50:
          return {
             "overall_status": STATUS_INSUFFICIENT_DATA,
             "page_1": {},
@@ -137,24 +142,13 @@ def validate_document(normalized_content: dict):
             "errors": ["Document content is empty, too short, or unreadable."]
         }
 
-    # --- Step 2: Extract & Validate Page 1 ---
-    # We ignore extraction_metadata here because normalized_content already implies extraction done.
-    # Actually wait, validate_document calls extract_page_1_headers again? 
-    # The routes.py calls ingest_document which calls extractors?
-    # Checking `routes.py`:
-    # normalized_content = await ingest_document(file, file_path)
-    # Checking `ingest_document` in `router.py` (not viewed but implied):
-    # Typically `ingest` returns structured data.
-    # BUT `validate_document` on line 133 of original file WAS calling `extract_page_1_headers`.
-    # AND `routes.py` passes `normalized_content`.
-    # So `normalized_content` probably just has RAW TEXT for Page 1, and `validate_document` extracts fields?
-    # Let's verify `ingest_document`.
-    # Based on `validate_document` original code:
-    # 139: p1_text = normalized_content.get("page_1", {}).get("text", "")
-    # 140: p1_data, _ = extract_page_1_headers(p1_text)
-    # So YES, we extract here.
-    
-    p1_data, _ = extract_page_1_headers(p1_text)
+    # --- Step 2: Extract & Validate Headers ---
+    # use robust extraction
+    # fallback to just page 1 text wrapped in dict if all_pages not present (e.g. non-pdf source)
+    if not all_pages:
+        all_pages = {1: p1_text}
+        
+    p1_data, _ = extract_headers(all_pages)
     p1_res_fields = validate_page_1(p1_data)
     
     # --- Step 3: Validate Page 2 ---

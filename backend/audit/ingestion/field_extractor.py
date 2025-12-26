@@ -1,46 +1,82 @@
 import re
 
-# Page 1 Label Map
-LABEL_MAP = {
-    "company_name": ["company name", "client name", "company"],
-    "year_period_end": ["year / period end", "period end", "year", "period"],
-    "completed_by": ["completed by", "preparer", "completed-by"],
-    "date": ["date"]
-}
 
-def extract_page_1_headers(text: str):
+# Robust Logic
+KEYWORDS_AUDIT_PAGE = ["company", "audit", "year", "period"]
+
+def extract_headers(all_pages_text: dict):
+    """
+    Robustly extracts headers from the first page that looks like an audit document.
+    """
     extracted_data = {
-        "company_name": None,
-        "year_period_end": None,
-        "completed_by": None,
-        "date": None
+         "company_name": None,
+         "year_period_end": None,
+         "completed_by": None,
+         "date": None
     }
-    # Using specific keys for validation usage later, though the prompt asked for "year" I'll map it.
+    extraction_metadata = {k: "NOT_FOUND" for k in extracted_data}
+
+    # 1. Identify Target Page
+    target_page_text = ""
+    target_page_num = 1
     
-    extraction_metadata = {k: "MISSING" for k in extracted_data}
+    # Try Page 1 first
+    p1 = all_pages_text.get(1, "")
+    keywords_found = sum(1 for k in KEYWORDS_AUDIT_PAGE if k in p1.lower())
     
-    if not text:
+    if keywords_found >= 2:
+        target_page_text = p1
+        target_page_num = 1
+    else:
+        # Scan other pages
+        found = False
+        sorted_pages = sorted(all_pages_text.keys())
+        for p_num in sorted_pages:
+            if p_num == 1: continue
+            text = all_pages_text[p_num]
+            k_count = sum(1 for k in KEYWORDS_AUDIT_PAGE if k in text.lower())
+            if k_count >= 2:
+                target_page_text = text
+                target_page_num = p_num
+                found = True
+                break
+        
+        if not found:
+            # Fallback to page 1 if nothing better found, effectively empty extract
+            target_page_text = p1
+
+    print(f"[DEBUG] Selected Page {target_page_num} for extraction.")
+    print(f"[DEBUG] Text sample: {target_page_text[:300]}")
+
+    if not target_page_text:
         return extracted_data, extraction_metadata
 
-    lines = text.split('\n')
-    
-    for line in lines:
-        line_clean = line.strip()
-        if not line_clean: continue
-            
-        for field_key, labels in LABEL_MAP.items():
-            if extracted_data[field_key] is not None: continue
-            
-            for label in labels:
-                pattern = f"^{re.escape(label)}[:\\s]+(.*)"
-                match = re.match(pattern, line_clean, re.IGNORECASE)
-                if match:
-                    value = match.group(1).strip()
-                    extracted_data[field_key] = value if value else ""
-                    extraction_metadata[field_key] = "FOUND" if value else "FOUND_EMPTY"
-                    break
-    
+    # 2. Robust Regex Extraction
+    # Defined inside function to use local scope ease
+    patterns = {
+        "company_name": r"(?i)(?:company|client)\s*name[:\s]+(.*?)(?:\n|\||$)",
+        "year_period_end": r"(?i)year\s*(?:/|\\)?\s*(?:period)?\s*(?:end)?[:\s]+(.*?)(?:\n|\||$)",
+        "completed_by": r"(?i)(?:completed|prepared)\s*by[:\s]+(.*?)(?:\n|\||$)",
+        "date": r"(?i)date(?:1_af_date)?[:\s]+(.*?)(?:\n|\||$)"
+    }
+
+    for field, pattern in patterns.items():
+        match = re.search(pattern, target_page_text)
+        if match:
+            # Clean up the match
+            raw_val = match.group(1).strip()
+            # Stop at common delimiters if regex was too greedy
+            # (Though non-greedy *? usually handles it stopping at newline)
+            if raw_val:
+                extracted_data[field] = raw_val
+                extraction_metadata[field] = "FOUND"
+            else:
+                extracted_data[field] = None
+        else:
+            extracted_data[field] = None
+
     return extracted_data, extraction_metadata
+
 
 def extract_page_2_rows(table_data: list):
     """
