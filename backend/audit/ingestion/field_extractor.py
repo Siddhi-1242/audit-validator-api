@@ -1,48 +1,78 @@
 import re
 
-
 # Robust Logic
-KEYWORDS_AUDIT_PAGE = ["company", "audit", "year", "period"]
+KEYWORDS_AUDIT_PAGE = [
+    "company",
+    "company name",
+    "year",
+    "period",
+    "completed",
+    "prepared",
+    "date"
+]
+
+def _extract_from_lines(lines):
+    result = {
+        "company_name": None,
+        "year_period_end": None,
+        "completed_by": None,
+        "date": None
+    }
+
+    for line in lines:
+        clean = line.strip()
+
+        if not result["company_name"]:
+            if len(clean) > 3 and clean.isupper() and "FORM" not in clean:
+                result["company_name"] = clean
+
+        if not result["year_period_end"]:
+            if re.search(r"\b20\d{2}\b", clean):
+                result["year_period_end"] = clean
+
+        if not result["completed_by"]:
+            if "prepared" in clean.lower() or "completed" in clean.lower():
+                result["completed_by"] = clean
+
+        if not result["date"]:
+            if re.search(r"\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}", clean):
+                result["date"] = clean
+
+    return result
+
 
 def extract_headers(all_pages_text: dict):
-    """
-    Robustly extracts headers from the first page that looks like an audit document.
-    """
+    print("🔥 NEW FIELD_EXTRACTOR ACTIVE 🔥")
+
     extracted_data = {
-         "company_name": None,
-         "year_period_end": None,
-         "completed_by": None,
-         "date": None
+        "company_name": None,
+        "year_period_end": None,
+        "completed_by": None,
+        "date": None
     }
     extraction_metadata = {k: "NOT_FOUND" for k in extracted_data}
 
     # 1. Identify Target Page
     target_page_text = ""
     target_page_num = 1
-    
-    # Try Page 1 first
+
     p1 = all_pages_text.get(1, "")
     keywords_found = sum(1 for k in KEYWORDS_AUDIT_PAGE if k in p1.lower())
-    
-    if keywords_found >= 2:
+
+    if keywords_found >= 1 or len(p1.strip()) > 200:
         target_page_text = p1
         target_page_num = 1
     else:
-        # Scan other pages
-        found = False
-        sorted_pages = sorted(all_pages_text.keys())
-        for p_num in sorted_pages:
-            if p_num == 1: continue
+        for p_num in sorted(all_pages_text.keys()):
+            if p_num == 1:
+                continue
             text = all_pages_text[p_num]
             k_count = sum(1 for k in KEYWORDS_AUDIT_PAGE if k in text.lower())
             if k_count >= 2:
                 target_page_text = text
                 target_page_num = p_num
-                found = True
                 break
-        
-        if not found:
-            # Fallback to page 1 if nothing better found, effectively empty extract
+        else:
             target_page_text = p1
 
     print(f"[DEBUG] Selected Page {target_page_num} for extraction.")
@@ -51,56 +81,38 @@ def extract_headers(all_pages_text: dict):
     if not target_page_text:
         return extracted_data, extraction_metadata
 
-    # 2. Robust Regex Extraction
-    # Defined inside function to use local scope ease
+    # 2. Regex Extraction
     patterns = {
-        "company_name": r"(?i)(?:company|client)\s*name[:\s]+(.*)",
-        "year_period_end": r"(?i)year\s*(?:/|\\)?\s*(?:period)?\s*(?:end)?[:\s]+(.*)",
-        "completed_by": r"(?i)(?:completed|prepared)\s*by[:\s]+(.*)",
-        "date": r"(?i)date(?:1_af_date)?[:\s]+(.*)"
+        "company_name": r"(?i)(?:company|client)\s*(?:name)?\s*[:\-]?\s+([A-Za-z0-9 &.,()\-]+)",
+        "year_period_end": r"(?i)(?:year|period)\s*(?:end)?\s*[:\-]?\s*([A-Za-z0-9 /\-]+)",
+        "completed_by": r"(?i)(?:completed|prepared)\s*by\s*[:\-]?\s*([A-Za-z0-9 &.,]+)",
+        "date": r"(?i)(?:date|dated)\s*[:\-]?\s*((?:\d{2}[\/\-]\d{2}[\/\-]\d{4})|(?:\d{1,2}\s+[A-Za-z]+\s+\d{4})|(?:[A-Za-z]+\s+\d{1,2},\s*\d{4}))"
     }
 
     for field, pattern in patterns.items():
         match = re.search(pattern, target_page_text)
         if match:
-            # Clean up the match: Take only the first line of the capture
-            # This avoids any regex issues with newlines
-            full_capture = match.group(1)
-            raw_val = re.split(r'[\r\n]+', full_capture)[0].split('|')[0].strip()
-            
-            # Label Bleed Guard
-            # 1. Check if ends with colon (likely captured the next label)
-            if raw_val.endswith(":"):
-                # Try to split by the last space-separated word if it looks like a label
-                # Or just treat as invalid/empty if it looks entirely like a label
-                # Simplest fix for "Year / Period End:" being captured as Company Name:
-                extraction_metadata[field] = "NOT_FOUND" 
-                extracted_data[field] = None
+            raw_val = re.split(r'[\r\n]+', match.group(1))[0].split('|')[0].strip()
+
+            if raw_val.endswith(":") or raw_val.lower() in KEYWORDS_AUDIT_PAGE:
                 continue
 
-            # 2. Check if it explicitly contains another known keyword followed by colon
-            # Heuristic: split on known next-field labels if they exist in the value
-            # e.g. "ABC Inc. Year:" -> "ABC Inc."
-            # We defined patterns keys, let's look for their label markers
-            # This is complex to do perfectly with regex alone, but we can do a quick split
-            # A common issue is "Company Name: ABC Year: 2023"
-            
-            # Simple heuristic: Split by " Year:" or " Period:" etc?
-            # Better: just use the simple "ends with :" check as primary guard.
-            # And maybe check if it contains "  " (double space) followed by something that looks like Title Case?
-            # Let's stick to the prompt's suggestion: "Reject values that ... End with :"
-            
-            if raw_val:
-                extracted_data[field] = raw_val
-                extraction_metadata[field] = "FOUND"
-            else:
-                extracted_data[field] = None
-        else:
-            extracted_data[field] = None
+            extracted_data[field] = raw_val
+            extraction_metadata[field] = "FOUND_AND_VALID"
+
+    # 3. Fallback Extraction
+    if any(v is None for v in extracted_data.values()):
+        lines = [l for l in target_page_text.splitlines() if l.strip()]
+        fallback = _extract_from_lines(lines)
+
+        for k, v in fallback.items():
+            if extracted_data[k] is None and v:
+                extracted_data[k] = v
+                extraction_metadata[k] = "FOUND_BY_FALLBACK"
 
     return extracted_data, extraction_metadata
-
-
+            
+ 
 def extract_page_2_rows(table_data: list):
     """
     Expects table_data to be a list of lists.
