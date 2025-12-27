@@ -19,23 +19,10 @@ def extract_headers(all_pages_text: Dict[Any, str]) -> Tuple[Dict[str, str], Dic
 
     # 1. Define Fields and their Aliases
     field_definitions = {
-        "company_name": [
-            r"Company\s*Name"
-        ],
-        "year_period_end": [
-            r"Year\s*/\s*Period\s*End",
-            r"Year\s*End",
-            r"Period\s*End"
-        ],
-        "completed_by": [
-            r"Completed\s*By",
-            r"Prepared\s*By"
-        ],
-        "date": [
-            r"Date1_af_date",
-            r"Dated",
-            r"Date"
-        ]
+        "company_name": [r"Company\s*Name"],
+        "year_period_end": [r"Year\s*/\s*Period\s*End", r"Year\s*End", r"Period\s*End"],
+        "completed_by": [r"Completed\s*By", r"Prepared\s*By"],
+        "date": [r"Date1_af_date", r"Dated", r"Date"]
     }
 
     # Pre-compile regexes for each field
@@ -43,7 +30,7 @@ def extract_headers(all_pages_text: Dict[Any, str]) -> Tuple[Dict[str, str], Dic
     for field, aliases in field_definitions.items():
         sorted_aliases = sorted(aliases, key=len, reverse=True)
         escaped_aliases = [re.escape(a).replace(r'\ ', r'\s*') for a in sorted_aliases]
-        pattern_str = r"(?i)(?:" + "|".join(escaped_aliases) + r")\s*[:]\s*(?P<value>.*)"
+        pattern_str = r"(?i)(?:" + "|".join(escaped_aliases) + r")\s*[:\n]?\s*(?P<value>.*)"
         field_regexes[field] = re.compile(pattern_str)
 
     # Date Validation Pattern
@@ -61,7 +48,7 @@ def extract_headers(all_pages_text: Dict[Any, str]) -> Tuple[Dict[str, str], Dic
         "completed_by": None,
         "date": None
     }
-    
+
     debug_log = []
 
     # 3. Scan line by line
@@ -69,9 +56,9 @@ def extract_headers(all_pages_text: Dict[Any, str]) -> Tuple[Dict[str, str], Dic
         text = all_pages_text.get(page_key, "")
         if not text:
             continue
-            
+
         lines = text.splitlines()
-        for line in lines:
+        for idx, line in enumerate(lines):
             line_stripped = line.strip()
             if not line_stripped:
                 continue
@@ -80,23 +67,26 @@ def extract_headers(all_pages_text: Dict[Any, str]) -> Tuple[Dict[str, str], Dic
                 match = regex.search(line)
                 if match:
                     raw_val = match.group("value").strip()
-                    
+
+                    # If raw_val is empty, try the next line
+                    if not raw_val and idx + 1 < len(lines):
+                        raw_val = lines[idx + 1].strip()
+
+                    # Normalize spaces
+                    raw_val = raw_val.replace("\u00A0", " ")
+                    raw_val = re.sub(r"\s+", " ", raw_val)
+
                     # --- Validation Logic ---
-                    
-                    # Rule 1: Reject empty
                     if not raw_val:
                         continue
-                        
-                    # Clean punctuation (leading and trailing)
+
                     clean_val = raw_val.lstrip("/: ").rstrip(".,;")
                     if not clean_val:
                         continue
-                    
-                    # Rule 2: Digit check for year/date
+
                     if field in ("year_period_end", "date") and not re.search(r"\d", clean_val):
                         continue
 
-                    # Rule 3: Strict Date Extraction
                     if field == "date":
                         date_match = DATE_PATTERN.search(clean_val)
                         if date_match:
