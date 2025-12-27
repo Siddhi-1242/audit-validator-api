@@ -1,48 +1,59 @@
 import re
+from typing import Dict, Tuple, Any, List
 
-# Robust Logic
-KEYWORDS_AUDIT_PAGE = [
-    "company",
-    "company name",
-    "year",
-    "period",
-    "completed",
-    "prepared",
-    "date"
-]
+def extract_headers(all_pages_text: Dict[Any, str]) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """
+    Extracts header fields from the provided text of all pages.
+    Scans the entire document line by line and keeps the last valid non-empty value found
+    for each field.
+    
+    Fields extracted:
+      - company_name
+      - year_period_end
+      - completed_by
+      - date
+    
+    Returns:
+        (extracted_data, extraction_metadata)
+    """
 
-def _extract_from_lines(lines):
-    result = {
-        "company_name": None,
-        "year_period_end": None,
-        "completed_by": None,
-        "date": None
+    # 1. Define Fields and their Aliases
+    field_definitions = {
+        "company_name": [
+            r"Company\s*Name"
+        ],
+        "year_period_end": [
+            r"Year\s*/\s*Period\s*End",
+            r"Year\s*End",
+            r"Period\s*End"
+        ],
+        "completed_by": [
+            r"Completed\s*By",
+            r"Prepared\s*By"
+        ],
+        "date": [
+            r"Date1_af_date",
+            r"Dated",
+            r"Date"
+        ]
     }
 
-    for line in lines:
-        clean = line.strip()
+    # Pre-compile regexes for each field
+    field_regexes = {}
+    for field, aliases in field_definitions.items():
+        sorted_aliases = sorted(aliases, key=len, reverse=True)
+        escaped_aliases = [re.escape(a).replace(r'\ ', r'\s*') for a in sorted_aliases]
+        pattern_str = r"(?i)(?:" + "|".join(escaped_aliases) + r")\s*[:]\s*(?P<value>.*)"
+        field_regexes[field] = re.compile(pattern_str)
 
-        if not result["company_name"]:
-            if len(clean) > 3 and clean.isupper() and "FORM" not in clean:
-                result["company_name"] = clean
+    # Date Validation Pattern
+    DATE_PATTERN = re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\w+\s+\d{1,2},\s*\d{4})\b")
 
-        if not result["year_period_end"]:
-            if re.search(r"\b20\d{2}\b", clean):
-                result["year_period_end"] = clean
-
-        if not result["completed_by"]:
-            if "prepared" in clean.lower() or "completed" in clean.lower():
-                result["completed_by"] = clean
-
-        if not result["date"]:
-            if re.search(r"\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}", clean):
-                result["date"] = clean
-
-    return result
-
-
-def extract_headers(all_pages_text: dict):
-    print("🔥 NEW FIELD_EXTRACTOR ACTIVE 🔥")
+    # 2. Sort pages to ensure deterministic processing order
+    try:
+        sorted_page_keys = sorted(all_pages_text.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
+    except Exception:
+        sorted_page_keys = sorted(all_pages_text.keys(), key=str)
 
     extracted_data = {
         "company_name": None,
@@ -50,101 +61,109 @@ def extract_headers(all_pages_text: dict):
         "completed_by": None,
         "date": None
     }
-    extraction_metadata = {k: "NOT_FOUND" for k in extracted_data}
+    
+    debug_log = []
 
-    # 1. Identify Target Page
-    target_page_text = ""
-    target_page_num = 1
-
-    p1 = all_pages_text.get(1, "")
-    keywords_found = sum(1 for k in KEYWORDS_AUDIT_PAGE if k in p1.lower())
-
-    if keywords_found >= 1 or len(p1.strip()) > 200:
-        target_page_text = p1
-        target_page_num = 1
-    else:
-        for p_num in sorted(all_pages_text.keys()):
-            if p_num == 1:
+    # 3. Scan line by line
+    for page_key in sorted_page_keys:
+        text = all_pages_text.get(page_key, "")
+        if not text:
+            continue
+            
+        lines = text.splitlines()
+        for line in lines:
+            line_stripped = line.strip()
+            if not line_stripped:
                 continue
-            text = all_pages_text[p_num]
-            k_count = sum(1 for k in KEYWORDS_AUDIT_PAGE if k in text.lower())
-            if k_count >= 2:
-                target_page_text = text
-                target_page_num = p_num
-                break
-        else:
-            target_page_text = p1
 
-    print(f"[DEBUG] Selected Page {target_page_num} for extraction.")
-    print(f"[DEBUG] Text sample: {target_page_text[:300]}")
+            for field, regex in field_regexes.items():
+                match = regex.search(line)
+                if match:
+                    raw_val = match.group("value").strip()
+                    
+                    # --- Validation Logic ---
+                    
+                    # Rule 1: Reject empty
+                    if not raw_val:
+                        continue
+                        
+                    # Clean punctuation (leading and trailing)
+                    clean_val = raw_val.lstrip("/: ").rstrip(".,;")
+                    if not clean_val:
+                        continue
+                    
+                    # Rule 2: Digit check for year/date
+                    if field in ("year_period_end", "date") and not re.search(r"\d", clean_val):
+                        continue
 
-    if not target_page_text:
-        return extracted_data, extraction_metadata
+                    # Rule 3: Strict Date Extraction
+                    if field == "date":
+                        date_match = DATE_PATTERN.search(clean_val)
+                        if date_match:
+                            clean_val = date_match.group(1)
+                        else:
+                            continue
 
-    # 2. Regex Extraction
-    patterns = {
-        "company_name": r"(?i)(?:company|client)\s*(?:name)?\s*[:\-]?\s+([A-Za-z0-9 &.,()\-]+)",
-        "year_period_end": r"(?i)(?:year|period)\s*(?:end)?\s*[:\-]?\s*([A-Za-z0-9 /\-]+)",
-        "completed_by": r"(?i)(?:completed|prepared)\s*by\s*[:\-]?\s*([A-Za-z0-9 &.,]+)",
-        "date": r"(?i)(?:date|dated)\s*[:\-]?\s*((?:\d{2}[\/\-]\d{2}[\/\-]\d{4})|(?:\d{1,2}\s+[A-Za-z]+\s+\d{4})|(?:[A-Za-z]+\s+\d{1,2},\s*\d{4}))"
+                    # Reference Rule: Last valid occurrence wins
+                    extracted_data[field] = clean_val
+                    debug_log.append(f"Page {page_key} [{field}]: {clean_val}")
+
+    metadata = {
+        "debug_log": debug_log,
+        "scanned_pages": len(sorted_page_keys)
     }
 
-    for field, pattern in patterns.items():
-        match = re.search(pattern, target_page_text)
-        if match:
-            raw_val = re.split(r'[\r\n]+', match.group(1))[0].split('|')[0].strip()
+    return extracted_data, metadata
 
-            if raw_val.endswith(":") or raw_val.lower() in KEYWORDS_AUDIT_PAGE:
-                continue
 
-            extracted_data[field] = raw_val
-            extraction_metadata[field] = "FOUND_AND_VALID"
-
-    # 3. Fallback Extraction
-    if any(v is None for v in extracted_data.values()):
-        lines = [l for l in target_page_text.splitlines() if l.strip()]
-        fallback = _extract_from_lines(lines)
-
-        for k, v in fallback.items():
-            if extracted_data[k] is None and v:
-                extracted_data[k] = v
-                extraction_metadata[k] = "FOUND_BY_FALLBACK"
-
-    return extracted_data, extraction_metadata
-            
- 
-def extract_page_2_rows(table_data: list):
+def extract_page_2_rows(table_data: List[List[Any]]) -> List[Dict[str, Any]]:
     """
-    Expects table_data to be a list of lists.
-    We assume the PDF table has 3 columns: Name, Criteria, Transaction Type.
-    We skip the header row if it detects headers.
+    Extracts row data from the provided 2D table structure (list of lists).
+    Assumes columns: Business Person Name, Criteria Code, Transaction Type.
+    
+    Improvements:
+    - Skips empty rows.
+    - Dynamically detects/skips header row.
+    - Ensures valid 3-column output structure.
     """
     rows = []
-    
     if not table_data:
         return rows
 
+    # 1. Detect and skip header
     start_index = 0
-    # Simple heuristic to skip header row if it contains "Name" or "Criteria"
+    header_keywords = {"name", "criteria", "transaction", "type", "business"}
+    
+    # Check first row
     first_row = table_data[0]
-    if first_row and any("name" in str(c).lower() for c in first_row):
-        start_index = 1
+    if first_row:
+        # Convert row to a single lowercase string to check for keywords
+        row_str = " ".join([str(c).lower() for c in first_row if c])
+        if any(keyword in row_str for keyword in header_keywords):
+            start_index = 1
 
+    current_row_id = 1
+    
     for i in range(start_index, len(table_data)):
         row_raw = table_data[i]
-        # Clean None values to empty strings
-        row_clean = [str(cell).strip() if cell else "" for cell in row_raw]
         
-        # Ensure we have at least 3 columns
+        # Normalize cells: None -> "", strip whitespace
+        row_clean = [str(cell).strip() if cell is not None else "" for cell in row_raw]
+        
+        # Skip completely empty rows
+        if not any(row_clean):
+            continue
+            
+        # Ensure at least 3 columns (pad if necessary)
         if len(row_clean) < 3:
-            # Pad with empty if reading failure
             row_clean += [""] * (3 - len(row_clean))
             
         rows.append({
-            "row_number": i + 1, # 1-based index including header offset logic
+            "row_number": current_row_id,
             "business_person_name": row_clean[0],
             "criteria_code": row_clean[1],
             "transaction_type": row_clean[2]
         })
+        current_row_id += 1
         
     return rows
