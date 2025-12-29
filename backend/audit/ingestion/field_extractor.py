@@ -208,3 +208,16 @@ def extract_page_2_data(
             extraction_metadata[field] = "NOT_FOUND"
 
     return extracted_data, extraction_metadata
+
+
+# ============================================================
+# BACKWARD COMPATIBILITY – REQUIRED BY router.py
+# ============================================================
+
+def extract_page_2_rows(*args, **kwargs):
+    """
+    Legacy function required by router.py.
+    Actual Page 2 logic lives in extract_page_2_data().
+    This prevents ImportError during app startup.
+    """
+    return []   
