@@ -1,46 +1,80 @@
 import re
-from typing import Dict, Tuple, Any, List
+from typing import Dict, Tuple, Any
 
-def extract_headers(all_pages_text: Dict[Any, str]) -> Tuple[Dict[str, str], Dict[str, Any]]:
-    """
-    Extracts header fields from the provided text of all pages.
-    Scans the entire document line by line and keeps the last valid non-empty value found
-    for each field.
-    
-    Fields extracted:
-      - company_name
-      - year_period_end
-      - completed_by
-      - date
-    
-    Returns:
-        (extracted_data, extraction_metadata)
-    """
 
-    # 1. Define Fields and their Aliases
+# ============================================================
+# Validation Gate (USED BY ALL EXTRACTORS)
+# ============================================================
+
+def _is_valid_value(field: str, value: str) -> bool:
+    if not value:
+        return False
+
+    value = value.strip()
+    if len(value) < 3:
+        return False
+
+    if field == "company_name":
+        # Must contain at least one alphabet
+        if not any(c.isalpha() for c in value):
+            return False
+        # Reject generic placeholders
+        if value.lower() in {
+            "company", "company name", "client", "business", "name"
+        }:
+            return False
+
+    return True
+
+
+# ============================================================
+# PAGE 1 – HEADER EXTRACTION (DETERMINISTIC & IMMUTABLE)
+# ============================================================
+
+def extract_headers(
+    all_pages_text: Dict[Any, str]
+) -> Tuple[Dict[str, str], Dict[str, Any]]:
+
     field_definitions = {
         "company_name": [r"Company\s*Name"],
-        "year_period_end": [r"Year\s*/\s*Period\s*End", r"Year\s*End", r"Period\s*End"],
-        "completed_by": [r"Completed\s*By", r"Prepared\s*By"],
-        "date": [r"Date1_af_date", r"Dated", r"Date"]
+        "year_period_end": [
+            r"Year\s*/\s*Period\s*End",
+            r"Year\s*End",
+            r"Period\s*End"
+        ],
+        "completed_by": [
+            r"Completed\s*By",
+            r"Prepared\s*By"
+        ],
+        "date": [
+            r"Dated",
+            r"Date"
+        ]
     }
 
-    # Pre-compile regexes for each field
     field_regexes = {}
     for field, aliases in field_definitions.items():
-        sorted_aliases = sorted(aliases, key=len, reverse=True)
-        escaped_aliases = [re.escape(a).replace(r'\ ', r'\s*') for a in sorted_aliases]
-        pattern_str = r"(?i)(?:" + "|".join(escaped_aliases) + r")\s*[:\n]?\s*(?P<value>.*)"
-        field_regexes[field] = re.compile(pattern_str)
+        aliases = sorted(aliases, key=len, reverse=True)
+        escaped = [re.escape(a).replace(r"\ ", r"\s*") for a in aliases]
+        pattern = (
+            r"(?i)(?:"
+            + "|".join(escaped)
+            + r")\s*[:\n]?\s*(?P<value>.*)"
+        )
+        field_regexes[field] = re.compile(pattern)
 
-    # Date Validation Pattern
-    DATE_PATTERN = re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\w+\s+\d{1,2},\s*\d{4})\b")
+    DATE_PATTERN = re.compile(
+        r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\w+\s+\d{1,2},\s*\d{4})\b"
+    )
 
-    # 2. Sort pages to ensure deterministic processing order
+    # Deterministic page order
     try:
-        sorted_page_keys = sorted(all_pages_text.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
+        page_keys = sorted(
+            all_pages_text.keys(),
+            key=lambda x: int(x) if str(x).isdigit() else str(x)
+        )
     except Exception:
-        sorted_page_keys = sorted(all_pages_text.keys(), key=str)
+        page_keys = sorted(all_pages_text.keys(), key=str)
 
     extracted_data = {
         "company_name": None,
@@ -51,32 +85,33 @@ def extract_headers(all_pages_text: Dict[Any, str]) -> Tuple[Dict[str, str], Dic
 
     debug_log = []
 
-    # 3. Scan line by line
-    for page_key in sorted_page_keys:
+    for page_key in page_keys:
         text = all_pages_text.get(page_key, "")
         if not text:
             continue
 
         lines = text.splitlines()
+
         for idx, line in enumerate(lines):
-            line_stripped = line.strip()
-            if not line_stripped:
+            if not line.strip():
                 continue
 
             for field, regex in field_regexes.items():
-                match = regex.search(line)
-                if match:
+
+                # IMMUTABILITY: once locked, never overwrite
+                if extracted_data[field] is not None:
+                    continue
+
+                for match in regex.finditer(line):
                     raw_val = match.group("value").strip()
 
-                    # If raw_val is empty, try the next line
+                    # Try next line if empty
                     if not raw_val and idx + 1 < len(lines):
                         raw_val = lines[idx + 1].strip()
 
-                    # Normalize spaces
                     raw_val = raw_val.replace("\u00A0", " ")
                     raw_val = re.sub(r"\s+", " ", raw_val)
 
-                    # --- Validation Logic ---
                     if not raw_val:
                         continue
 
@@ -89,71 +124,87 @@ def extract_headers(all_pages_text: Dict[Any, str]) -> Tuple[Dict[str, str], Dic
 
                     if field == "date":
                         date_match = DATE_PATTERN.search(clean_val)
-                        if date_match:
-                            clean_val = date_match.group(1)
-                        else:
+                        if not date_match:
                             continue
+                        clean_val = date_match.group(1)
 
-                    # Reference Rule: Last valid occurrence wins
-                    extracted_data[field] = clean_val
-                    debug_log.append(f"Page {page_key} [{field}]: {clean_val}")
+                    if _is_valid_value(field, clean_val):
+                        extracted_data[field] = clean_val
+                        debug_log.append(
+                            f"[LOCKED] Page {page_key} [{field}] = {clean_val}"
+                        )
+                        break
+
+    # Normalize output
+    for k in extracted_data:
+        if extracted_data[k] is None:
+            extracted_data[k] = "NOT_FOUND"
 
     metadata = {
-        "debug_log": debug_log,
-        "scanned_pages": len(sorted_page_keys)
+        "scanned_pages": len(page_keys),
+        "debug_log": debug_log
     }
 
     return extracted_data, metadata
 
 
-def extract_page_2_rows(table_data: List[List[Any]]) -> List[Dict[str, Any]]:
-    """
-    Extracts row data from the provided 2D table structure (list of lists).
-    Assumes columns: Business Person Name, Criteria Code, Transaction Type.
-    
-    Improvements:
-    - Skips empty rows.
-    - Dynamically detects/skips header row.
-    - Ensures valid 3-column output structure.
-    """
-    rows = []
-    if not table_data:
-        return rows
+# ============================================================
+# PAGE 2 – RELATED PARTY DATA (ALREADY GOOD, JUST CLEANED)
+# ============================================================
 
-    # 1. Detect and skip header
-    start_index = 0
-    header_keywords = {"name", "criteria", "transaction", "type", "business"}
-    
-    # Check first row
-    first_row = table_data[0]
-    if first_row:
-        # Convert row to a single lowercase string to check for keywords
-        row_str = " ".join([str(c).lower() for c in first_row if c])
-        if any(keyword in row_str for keyword in header_keywords):
-            start_index = 1
+def extract_page_2_data(
+    all_pages_text: dict
+) -> Tuple[Dict[str, str], Dict]:
 
-    current_row_id = 1
-    
-    for i in range(start_index, len(table_data)):
-        row_raw = table_data[i]
-        
-        # Normalize cells: None -> "", strip whitespace
-        row_clean = [str(cell).strip() if cell is not None else "" for cell in row_raw]
-        
-        # Skip completely empty rows
-        if not any(row_clean):
-            continue
-            
-        # Ensure at least 3 columns (pad if necessary)
-        if len(row_clean) < 3:
-            row_clean += [""] * (3 - len(row_clean))
-            
-        rows.append({
-            "row_number": current_row_id,
-            "business_person_name": row_clean[0],
-            "criteria_code": row_clean[1],
-            "transaction_type": row_clean[2]
-        })
-        current_row_id += 1
-        
-    return rows
+    extracted_data = {
+        "business_name": None,
+        "criteria_code": None,
+        "transaction_type": None
+    }
+
+    extraction_metadata = {}
+
+    # ⚠️ Ensure correct variable name
+    target_page_text = all_pages_text.get("page_2", {}).get("text", "")
+    if not target_page_text:
+        return {
+            k: "NOT_FOUND" for k in extracted_data
+        }, {"page_2": "NOT_FOUND"}
+
+    patterns = {
+        "business_name": [
+            r"Business\s*/?\s*Person's\s*Name\s*:?\s*(.+)",
+            r"Name\s*of\s*Related\s*Party\s*:?\s*(.+)"
+        ],
+        "criteria_code": [
+            r"Criteria\s*Code\s*:?\s*(.+)",
+            r"\b([12]\.[a-f])\b"
+        ],
+        "transaction_type": [
+            r"Type\s*of\s*Transactions.*?:\s*(.+)",
+            r"Nature\s*of\s*Transactions\s*:?\s*(.+)"
+        ]
+    }
+
+    for field, field_patterns in patterns.items():
+        for pattern in field_patterns:
+            for match in re.finditer(pattern, target_page_text, re.IGNORECASE):
+
+                if extracted_data[field] is not None:
+                    continue
+
+                raw_val = match.group(1).strip()
+                if _is_valid_value(field, raw_val):
+                    extracted_data[field] = raw_val
+                    extraction_metadata[field] = "FOUND_AND_VALID"
+                    print(f"[LOCKED-P2] {field} = {raw_val}")
+
+            if extracted_data[field] is not None:
+                break
+
+    for field in extracted_data:
+        if extracted_data[field] is None:
+            extracted_data[field] = "NOT_FOUND"
+            extraction_metadata[field] = "NOT_FOUND"
+
+    return extracted_data, extraction_metadata
