@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .api import routes
+from .api.routes import router as validation_router
 
 app = FastAPI(title="Audit Header Validator")
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,8 +13,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API Routes
 app.include_router(routes.router, prefix="/api")
+app.include_router(validation_router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn

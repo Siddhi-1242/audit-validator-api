@@ -1,68 +1,126 @@
 import os
+
 from .docx_loader import ingest_docx
 from .spreadsheet_loader import ingest_spreadsheet
 from .text_extractor import extract_pdf_data
-# We need to adapt pdf extractor to the new contract here or import it
 from .field_extractor import extract_page_2_rows
+from .acroform_extractor import extract_acroform_data
+
 
 async def ingest_document(file, file_path: str) -> dict:
     """
     Router for document ingestion.
-    Normalizes output to Page 1 Text and Page 2 Rows.
+
+    FINAL OUTPUT CONTRACT (USED BY NORMALIZER + VALIDATOR):
+    {
+      "page_1": {
+        company_name,
+        year_period_end,
+        completed_by,
+        date
+      },
+      "page_2": {
+        "rows": [
+          {
+            business_name,
+            criteria_code,
+            transaction_type
+          }
+        ]
+      }
+    }
     """
+
     ext = os.path.splitext(file.filename)[1].lower()
-    
-    if ext == '.pdf':
-        # Reuse existing logic but normalize the output structure here
-        # extract_pdf_data returns: pages_text, pages_tables
+
+    # ============================================================
+    # PDF INGESTION
+    # ============================================================
+    if ext == ".pdf":
+
+        # ---------- 1️⃣ ACROFORM (Tier-1) ----------
+        acro = extract_acroform_data(file_path)
+
+        # -------- Page 1 (FLATTENED) --------
+        page_1_fields = {
+            k: v
+            for k, v in acro.get("page_1", {}).items()
+            if v
+        }
+
+        # -------- Page 2 (FLATTENED) --------
+        page_2_rows = []
+        for row in acro.get("page_2", {}).get("rows", []):
+            flat_row = {
+                k: v
+                for k, v in row.items()
+                if v
+            }
+            if flat_row:
+                page_2_rows.append(flat_row)
+
+        # ✅ If AcroForm produced anything, RETURN HERE
+        if page_1_fields or page_2_rows:
+            return {
+                "page_1": page_1_fields,
+                "page_2": {
+                    "rows": page_2_rows
+                }
+            }
+
+        # ---------- 2️⃣ TEXT FALLBACK (Tier-2) ----------
         pages_text, pages_tables = extract_pdf_data(file_path)
-        
-        p1_text = pages_text.get(1, "")
-        
-        # We need to convert the raw table data (list of lists) into our dict structure 
-        # But wait, existing extract_page_2_rows DOES that conversion.
-        # But the NEW validator expects "business_name" key not "business_person_name"?
-        # Let's check the contract. The NEW contract asks for "business_name".
-        # Existing logic uses "business_person_name".
-        # We should map it here or update extract_page_2_rows.
-        
+
+        # Page 1 fallback (text only)
+        page_1_fields = {}
+        page_1_text = pages_text.get(1, "")
+        if page_1_text:
+            page_1_fields["raw_text"] = page_1_text
+
+        # Page 2 fallback (tables)
         raw_table = pages_tables.get(2, [])
-        # We use the existing helper to parse the table list-of-lists
-        rows_dicts = extract_page_2_rows(raw_table) 
-        # Now we might need to key-map if the previous code used different keys.
-        # Check field_extractor.py: keys are 'business_person_name'.
-        # Contract wants: 'business_name'.
-        
-        # Remap for consistency
-        normalized_rows = []
+        rows_dicts = extract_page_2_rows(raw_table)
+
+        page_2_rows = []
         for r in rows_dicts:
-            normalized_rows.append({
-                "business_name": r.get("business_person_name"),
-                "criteria_code": r.get("criteria_code"),
-                "transaction_type": r.get("transaction_type")
-            })
+            flat_row = {}
+            if r.get("business_person_name"):
+                flat_row["business_name"] = r["business_person_name"]
+            if r.get("criteria_code"):
+                flat_row["criteria_code"] = r["criteria_code"]
+            if r.get("transaction_type"):
+                flat_row["transaction_type"] = r["transaction_type"]
+
+            if flat_row:
+                page_2_rows.append(flat_row)
 
         return {
-            "page_1": {"text": p1_text},
-            "page_2": {"rows": normalized_rows},
-            "all_pages_text": pages_text  # Pass full text for robust header extraction
+            "page_1": page_1_fields,
+            "page_2": {
+                "rows": page_2_rows
+            }
         }
-        
-    elif ext == '.docx':
-        # We need to read the file bytes
-        # Since file is an UploadFile, but we saved it to file_path
+
+    # ============================================================
+    # DOCX
+    # ============================================================
+    elif ext == ".docx":
         with open(file_path, "rb") as f:
             content = f.read()
         return ingest_docx(content)
-        
-    elif ext in ['.xlsx', '.csv']:
+
+    # ============================================================
+    # SPREADSHEET
+    # ============================================================
+    elif ext in [".xlsx", ".csv"]:
         with open(file_path, "rb") as f:
             content = f.read()
         return ingest_spreadsheet(content, file.filename)
-        
-    else:
-        # Unsupported - Validator orchestrator should handle empty/malformed
-        return {
-             "page_1": {"text": ""},
-             "page_2": {"rows": []}
-        }
+
+    # ============================================================
+    # UNSUPPORTED
+    # ============================================================
+    return {
+        "page_1": {},
+        "page_2": {"rows": []}
+    }

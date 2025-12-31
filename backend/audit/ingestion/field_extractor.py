@@ -3,37 +3,35 @@ from typing import Dict, Tuple, Any
 
 
 # ============================================================
-# Validation Gate (USED BY ALL EXTRACTORS)
+# NOTE:
+# Validation MUST NOT happen in extraction.
+# This function is kept for backward compatibility / future use,
+# but is NOT called anywhere in this file.
 # ============================================================
 
 def _is_valid_value(field: str, value: str) -> bool:
     if not value:
         return False
-
     value = value.strip()
     if len(value) < 3:
         return False
-
     if field == "company_name":
-        # Must contain at least one alphabet
         if not any(c.isalpha() for c in value):
             return False
-        # Reject generic placeholders
         if value.lower() in {
             "company", "company name", "client", "business", "name"
         }:
             return False
-
     return True
 
 
 # ============================================================
-# PAGE 1 – HEADER EXTRACTION (DETERMINISTIC & IMMUTABLE)
+# PAGE 1 – HEADER EXTRACTION (EXTRACTION ONLY, NO VALIDATION)
 # ============================================================
 
 def extract_headers(
     all_pages_text: Dict[Any, str]
-) -> Tuple[Dict[str, str], Dict[str, Any]]:
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     field_definitions = {
         "company_name": [r"Company\s*Name"],
@@ -67,7 +65,6 @@ def extract_headers(
         r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\w+\s+\d{1,2},\s*\d{4})\b"
     )
 
-    # Deterministic page order
     try:
         page_keys = sorted(
             all_pages_text.keys(),
@@ -98,14 +95,14 @@ def extract_headers(
 
             for field, regex in field_regexes.items():
 
-                # IMMUTABILITY: once locked, never overwrite
+                # Do not overwrite once found
                 if extracted_data[field] is not None:
                     continue
 
                 for match in regex.finditer(line):
                     raw_val = match.group("value").strip()
 
-                    # Try next line if empty
+                    # Try next line if value missing
                     if not raw_val and idx + 1 < len(lines):
                         raw_val = lines[idx + 1].strip()
 
@@ -119,6 +116,7 @@ def extract_headers(
                     if not clean_val:
                         continue
 
+                    # Assist date/year extraction (NOT validation)
                     if field in ("year_period_end", "date") and not re.search(r"\d", clean_val):
                         continue
 
@@ -128,17 +126,12 @@ def extract_headers(
                             continue
                         clean_val = date_match.group(1)
 
-                    if _is_valid_value(field, clean_val):
-                        extracted_data[field] = clean_val
-                        debug_log.append(
-                            f"[LOCKED] Page {page_key} [{field}] = {clean_val}"
-                        )
-                        break
-
-    # Normalize output
-    for k in extracted_data:
-        if extracted_data[k] is None:
-            extracted_data[k] = "NOT_FOUND"
+                    # ✅ FINAL FIX: NO VALIDATION HERE
+                    extracted_data[field] = clean_val
+                    debug_log.append(
+                        f"[LOCKED] Page {page_key} [{field}] = {clean_val}"
+                    )
+                    break
 
     metadata = {
         "scanned_pages": len(page_keys),
@@ -149,12 +142,12 @@ def extract_headers(
 
 
 # ============================================================
-# PAGE 2 – RELATED PARTY DATA (ALREADY GOOD, JUST CLEANED)
+# PAGE 2 – RELATED PARTY DATA (TOP 3 FIELDS, NO VALIDATION)
 # ============================================================
 
 def extract_page_2_data(
     all_pages_text: dict
-) -> Tuple[Dict[str, str], Dict]:
+) -> Tuple[Dict[str, Any], Dict]:
 
     extracted_data = {
         "business_name": None,
@@ -164,12 +157,9 @@ def extract_page_2_data(
 
     extraction_metadata = {}
 
-    # ⚠️ Ensure correct variable name
     target_page_text = all_pages_text.get("page_2", {}).get("text", "")
     if not target_page_text:
-        return {
-            k: "NOT_FOUND" for k in extracted_data
-        }, {"page_2": "NOT_FOUND"}
+        return extracted_data, {"page_2": "NOT_FOUND"}
 
     patterns = {
         "business_name": [
@@ -177,8 +167,7 @@ def extract_page_2_data(
             r"Name\s*of\s*Related\s*Party\s*:?\s*(.+)"
         ],
         "criteria_code": [
-            r"Criteria\s*Code\s*:?\s*(.+)",
-            r"\b([12]\.[a-f])\b"
+            r"\b([12]\.[a-fA-F])\b"
         ],
         "transaction_type": [
             r"Type\s*of\s*Transactions.*?:\s*(.+)",
@@ -194,18 +183,14 @@ def extract_page_2_data(
                     continue
 
                 raw_val = match.group(1).strip()
-                if _is_valid_value(field, raw_val):
-                    extracted_data[field] = raw_val
-                    extraction_metadata[field] = "FOUND_AND_VALID"
-                    print(f"[LOCKED-P2] {field} = {raw_val}")
+
+                # ✅ FINAL FIX: KEEP RAW VALUE
+                extracted_data[field] = raw_val
+                extraction_metadata[field] = "FOUND"
+                break
 
             if extracted_data[field] is not None:
                 break
-
-    for field in extracted_data:
-        if extracted_data[field] is None:
-            extracted_data[field] = "NOT_FOUND"
-            extraction_metadata[field] = "NOT_FOUND"
 
     return extracted_data, extraction_metadata
 
@@ -218,6 +203,5 @@ def extract_page_2_rows(*args, **kwargs):
     """
     Legacy function required by router.py.
     Actual Page 2 logic lives in extract_page_2_data().
-    This prevents ImportError during app startup.
     """
-    return []   
+    return []
