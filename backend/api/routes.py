@@ -2,9 +2,9 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 import os
 import tempfile
 
-from audit_pdf_validator.backend.audit.ingestion.router import ingest_document
-from audit_pdf_validator.backend.audit.validation.validator import validate_document
-from audit_pdf_validator.backend.audit.normalization.normalizer import normalize_for_validation
+from backend.audit.ingestion.router import ingest_document
+from backend.audit.validation.validator import validate_document
+from backend.audit.normalization.normalizer import normalize_for_validation
 
 router = APIRouter()
 
