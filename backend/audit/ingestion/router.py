@@ -41,6 +41,11 @@ async def ingest_document(file, file_path: str) -> dict:
         # ---------- 1️⃣ ACROFORM (Tier-1) ----------
         acro = extract_acroform_data(file_path)
 
+        print("\n================ ACROFORM DEBUG ================")
+        print("PAGE 1:", acro.get("page_1"))
+        print("PAGE 2 ROWS:", acro.get("page_2", {}).get("rows"))
+        print("================================================\n")
+
         # -------- Page 1 (FLATTENED) --------
         page_1_fields = {
             k: v

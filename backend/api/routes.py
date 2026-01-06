@@ -12,7 +12,7 @@ router = APIRouter()
 def build_frontend_response(validation_result: dict):
     """
     Converts backend validation output into frontend-friendly response.
-    Shows ONLY missing or incorrect fields.
+    Shows ONLY missing or incorrect fields (Page 1 + Page 2).
     """
     issues = []
 
@@ -27,6 +27,15 @@ def build_frontend_response(validation_result: dict):
 
     # -------- Page 2 --------
     page_2 = validation_result.get("page_2", {})
+
+    # ✅ Section-level Page-2 failure (VERY IMPORTANT)
+    if page_2.get("status") == "FAIL":
+        issues.append({
+            "field": "Related Party Section (Page 2)",
+            "message": page_2.get("detail", "Invalid related party information")
+        })
+
+    # ✅ Row-level Page-2 validation
     for row in page_2.get("rows", []):
         for field, res in row.get("fields", {}).items():
             if res.get("status") != "FOUND_AND_VALID":
@@ -38,7 +47,12 @@ def build_frontend_response(validation_result: dict):
     return {
         "overall_status": validation_result.get("overall_status"),
         "can_proceed": validation_result.get("overall_status") == "PASS",
-        "issues": issues
+        "issues": issues,
+        "page_2": {
+            "status": page_2.get("status"),
+            "detail": page_2.get("detail"),
+            "rows": page_2.get("rows", [])
+        }
     }
 
 
@@ -76,7 +90,7 @@ async def validate_document_endpoint(file: UploadFile = File(...)):
         # 3️⃣ Normalize
         normalized_payload = normalize_for_validation(extracted_content)
 
-        # ✅ 4️⃣ VALIDATE (DIRECT – NO ADAPTER)
+        # 4️⃣ Validate
         validation_result = validate_document(normalized_payload)
 
         # 5️⃣ Frontend response

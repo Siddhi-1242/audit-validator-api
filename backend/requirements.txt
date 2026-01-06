@@ -1,7 +1,10 @@
 fastapi
 uvicorn
 python-multipart
+pdfplumber
+pydantic
+pytest
+python-docx
 pandas
 openpyxl
-python-docx
-pdfplumber
+pypdf
