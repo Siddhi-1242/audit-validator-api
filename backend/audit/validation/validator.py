@@ -21,9 +21,8 @@ FIELD_STATUS_VALID = "FOUND_AND_VALID"
 FIELD_STATUS_INVALID = "FOUND_BUT_INVALID"
 FIELD_STATUS_NOT_FOUND = "NOT_FOUND"
 
-
 # ============================================================
-# NORMALIZATION
+# NORMALIZATION UTILS
 # ============================================================
 
 def clean_value(value):
@@ -37,9 +36,8 @@ def clean_value(value):
     val = " ".join(val.split())
     return val if val else None
 
-
 # ============================================================
-# FIELD VALIDATION
+# FIELD VALIDATION (CORE ENGINE)
 # ============================================================
 
 def validate_field(value, rule_func, field_name):
@@ -70,7 +68,6 @@ def validate_field(value, rule_func, field_name):
         "error": err
     }
 
-
 # ============================================================
 # PAGE 1 VALIDATION (DIRECT – ACROFORM)
 # ============================================================
@@ -99,32 +96,32 @@ def validate_page_1(data: dict):
         )
     }
 
-
 # ============================================================
-# PAGE 2 VALIDATION
+# PAGE 2 VALIDATION (NORMALIZED TABLE DATA)
 # ============================================================
 
 def validate_page_2(data: dict):
     rows = data.get("rows", [])
-    validated_rows = []
 
-    filled_rows = [
-        row for row in rows
-        if any(
-            clean_value(row.get(k))
-            for k in ("business_name", "criteria_code", "transaction_type")
-        )
-    ]
-
-    # Zero related parties is allowed
-    if not filled_rows:
+    # Case 1: Page-2 present but empty → FAIL
+    if not rows:
         return {
-            "status": STATUS_PASS,
-            "detail": "No related party transactions disclosed (allowed).",
+            "status": STATUS_FAIL,
+            "detail": "Related party section is empty. At least two rows are required.",
             "rows": []
         }
 
-    for idx, row in enumerate(filled_rows):
+    # Case 2: Less than 2 rows → FAIL
+    if len(rows) < 2:
+        return {
+            "status": STATUS_FAIL,
+            "detail": "At least two related party rows are required.",
+            "rows": []
+        }
+
+    validated_rows = []
+
+    for idx, row in enumerate(rows):
         validated_rows.append({
             "row_number": idx + 1,
             "fields": {
@@ -151,18 +148,18 @@ def validate_page_2(data: dict):
         "rows": validated_rows
     }
 
-
 # ============================================================
 # DOCUMENT VALIDATION (FINAL ENTRY POINT)
 # ============================================================
 
 def validate_document(normalized_content: dict):
     all_errors = []
+    all_statuses = []
 
     # -------------------------------
-    # Page 1 (USE NORMALIZED DATA)
+    # Page 1
     # -------------------------------
-    page_1_data = normalized_content.get("page_1", {})
+    page_1_data = normalized_content.get("page_1")
 
     if not page_1_data:
         return {
@@ -174,6 +171,11 @@ def validate_document(normalized_content: dict):
 
     page_1_result = validate_page_1(page_1_data)
 
+    for field, result in page_1_result.items():
+        all_statuses.append(result["status"])
+        if result["error"]:
+            all_errors.append(f"Page 1 {field}: {result['error']}")
+
     # -------------------------------
     # Page 2
     # -------------------------------
@@ -181,15 +183,10 @@ def validate_document(normalized_content: dict):
         normalized_content.get("page_2", {})
     )
 
-    # -------------------------------
-    # Aggregate status
-    # -------------------------------
-    all_statuses = []
-
-    for field, result in page_1_result.items():
-        all_statuses.append(result["status"])
-        if result["error"]:
-            all_errors.append(f"Page 1 {field}: {result['error']}")
+    # Page-2 structural failure must affect overall status
+    if page_2_result.get("status") == STATUS_FAIL:
+        all_statuses.append(FIELD_STATUS_INVALID)
+        all_errors.append(page_2_result.get("detail"))
 
     if "rows" in page_2_result:
         for row in page_2_result["rows"]:
@@ -200,6 +197,9 @@ def validate_document(normalized_content: dict):
                         f"Page 2 Row {row['row_number']} {field}: {result['error']}"
                     )
 
+    # -------------------------------
+    # Final aggregation
+    # -------------------------------
     if FIELD_STATUS_INVALID in all_statuses:
         overall_status = STATUS_FAIL
     elif FIELD_STATUS_NOT_FOUND in all_statuses:
